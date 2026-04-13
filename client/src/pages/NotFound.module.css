@@ -1,0 +1,47 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+  padding: 40px;
+}
+
+.code {
+  font-size: 96px;
+  font-weight: 800;
+  color: var(--border2);
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.sub {
+  font-size: 15px;
+  color: var(--text3);
+}
+
+.btn {
+  margin-top: 16px;
+  padding: 11px 24px;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: var(--r-md);
+  color: var(--text2);
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
