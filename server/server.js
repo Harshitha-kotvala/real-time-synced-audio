@@ -17,72 +17,88 @@ const roomManager = require("./roomManager");
 
 const app = express();
 const httpServer = http.createServer(app);
-const io = new Server(server, {
+
+// Socket.IO CORS
+const io = new Server(httpServer, {
   cors: {
     origin: [
       "http://localhost:5173",
-      "https://real-time-synced-audio.vercel.app"
+      "https://real-time-synced-audio.vercel.app",
     ],
     methods: ["GET", "POST"],
-    credentials: true
-  }
+    credentials: true,
+  },
 });
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://real-time-synced-audio.vercel.app"
-  ],
-  credentials: true
-}))
+
+// Express CORS
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "https://real-time-synced-audio.vercel.app",
+    ],
+    credentials: true,
+  })
+);
+
 app.use(cookieParser());
 app.use(express.json());
+
 app.use("/auth", authRoutes);
 app.use("/room", requireAuth, roomRoutes);
 
-app.get("/health", (req, res) => res.json({ status: "ok" }));
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
 
 io.on("connection", (socket) => {
   console.log(`Socket connected: ${socket.id}`);
 
-  // User joins a room
-  socket.on("join-room", async ({ roomId, userName, password, inviteToken }) => {
-    const access = await roomManager.canJoinRoom(roomId, { password, inviteToken });
-    if (!access.ok) {
-      socket.emit("error", { message: access.error });
-      return;
+  socket.on(
+    "join-room",
+    async ({ roomId, userName, password, inviteToken }) => {
+      const access = await roomManager.canJoinRoom(roomId, {
+        password,
+        inviteToken,
+      });
+
+      if (!access.ok) {
+        socket.emit("error", { message: access.error });
+        return;
+      }
+
+      const room = roomManager.joinRoom(roomId, socket.id, userName);
+
+      if (!room) {
+        socket.emit("error", { message: "Room not found" });
+        return;
+      }
+
+      socket.join(roomId);
+      socket.data.roomId = roomId;
+      socket.data.userName = userName;
+
+      socket.to(roomId).emit("user-joined", {
+        userId: socket.id,
+        userName,
+        users: room.users,
+      });
+
+      socket.emit("room-joined", {
+        room: roomManager.toClientRoom(room),
+        isHost: room.host === socket.id,
+      });
+
+      const hostSocketId = room.host;
+
+      if (hostSocketId && hostSocketId !== socket.id) {
+        io.to(hostSocketId).emit("request-sync", {
+          requesterId: socket.id,
+        });
+      }
     }
+  );
 
-    const room = roomManager.joinRoom(roomId, socket.id, userName);
-    if (!room) {
-      socket.emit("error", { message: "Room not found" });
-      return;
-    }
-
-    socket.join(roomId);
-    socket.data.roomId = roomId;
-    socket.data.userName = userName;
-
-    // Tell everyone else someone joined
-    socket.to(roomId).emit("user-joined", {
-      userId: socket.id,
-      userName,
-      users: room.users,
-    });
-
-    // Send the new user the current room state so they can sync
-    socket.emit("room-joined", {
-      room: roomManager.toClientRoom(room),
-      isHost: room.host === socket.id,
-    });
-
-    // Ask host for latest timestamp (more accurate than stored state)
-    const hostSocketId = room.host;
-    if (hostSocketId && hostSocketId !== socket.id) {
-      io.to(hostSocketId).emit("request-sync", { requesterId: socket.id });
-    }
-  });
-
-  // Host sends back current state when a new user joins
   socket.on("sync-response", ({ requesterId, timestamp, playing }) => {
     io.to(requesterId).emit("sync-state", {
       timestamp,
@@ -91,20 +107,18 @@ io.on("connection", (socket) => {
     });
   });
 
-  // Sync handlers (play, pause, seek, video-change)
   handleSync(io, socket);
-
-  // Chat handlers
   handleChat(io, socket);
 
   socket.on("disconnect", () => {
     const { roomId, userName } = socket.data;
+
     if (!roomId) return;
 
     const result = roomManager.leaveRoom(roomId, socket.id);
+
     if (!result) return;
 
-    // If the host left, assign a new one
     if (result.newHost) {
       io.to(roomId).emit("host-changed", {
         newHostId: result.newHost,
@@ -118,7 +132,9 @@ io.on("connection", (socket) => {
       users: result.users,
     });
 
-    console.log(`Socket disconnected: ${socket.id} left room ${roomId}`);
+    console.log(
+      `Socket disconnected: ${socket.id} left room ${roomId}`
+    );
   });
 });
 
